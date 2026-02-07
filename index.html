@@ -34,6 +34,18 @@
 
         /* --- 2. GAME OBJECTS --- */
         .food { fill: #ffff00; stroke: none; filter: drop-shadow(0 0 5px #ffff00); }
+        
+        /* NEW BLUE POWER PELLET STYLE */
+        .power-pellet { 
+            fill: #00ffff; 
+            filter: drop-shadow(0 0 10px #00ffff); 
+            animation: pulse-blue 1s infinite alternate; 
+        }
+        @keyframes pulse-blue { from { r:6; opacity: 0.7; } to { r:9; opacity: 1; } }
+
+        /* GHOST MODE STYLE (Added for player) */
+        .ghost { opacity: 0.3 !important; }
+
         .enemy-red { fill: #ff0000; stroke: #ffffff; stroke-width: 1.5; }
         .enemy-stalker { fill: #aa00ff; stroke: #ffffff; stroke-width: 1.5; }
         .particle { pointer-events: none; opacity: 0.8; }
@@ -159,6 +171,7 @@
         <path id="segment" d="M0,-8 L6,-4 L6,4 L0,8 L-6,4 L-6,-4 Z" />
     </defs>
     <g id="particle-layer"></g>
+    <g id="power-layer"></g>
     <g id="food-layer"></g>
     <g id="enemies-layer"></g>
     <g id="player-layer"></g>
@@ -185,6 +198,10 @@
                 osc.type = 'sawtooth'; osc.frequency.setValueAtTime(100, now); osc.frequency.linearRampToValueAtTime(50, now + 0.5);
                 gain.gain.setValueAtTime(0.2, now); gain.gain.linearRampToValueAtTime(0, now + 0.5);
                 osc.start(now); osc.stop(now + 0.5);
+            } else if (type === 'power') { // New Power Sound
+                osc.type = 'square'; osc.frequency.setValueAtTime(200, now); osc.frequency.linearRampToValueAtTime(800, now + 0.3);
+                gain.gain.setValueAtTime(0.1, now); gain.gain.linearRampToValueAtTime(0, now + 0.3);
+                osc.start(now); osc.stop(now + 0.3);
             }
         }
     };
@@ -200,9 +217,10 @@
     
     let isMissionComplete = (lastUnlockDate === today);
 
-    // Added 'energy' to player object
-    const player = { segments: [], score: 0, color: '#00ffff', isBoosting: false, speed: 7, energy: 100 };
-    let enemies = [], foodPellets = [], particles = [], pointer = { x: window.innerWidth/2, y: window.innerHeight/2 }, gameRunning = false;
+    // Added 'invisibleTimer' to player object
+    const player = { segments: [], score: 0, color: '#00ffff', isBoosting: false, speed: 7, energy: 100, invisibleTimer: 0 };
+    // Added 'powerPellets' array
+    let enemies = [], foodPellets = [], powerPellets = [], particles = [], pointer = { x: window.innerWidth/2, y: window.innerHeight/2 }, gameRunning = false;
     let frameCount = 0;
 
     /* --- UI UPDATES --- */
@@ -266,11 +284,13 @@
         document.getElementById('enemies-layer').innerHTML='';
         document.getElementById('food-layer').innerHTML='';
         document.getElementById('particle-layer').innerHTML='';
+        document.getElementById('power-layer').innerHTML=''; // Clear power layer
         
         // Reset player stats
-        player.segments = []; enemies = []; foodPellets = []; particles = []; 
+        player.segments = []; enemies = []; foodPellets = []; powerPellets = []; particles = []; 
         player.score = 0;
-        player.energy = 100; // Reset Energy
+        player.energy = 100;
+        player.invisibleTimer = 0; // Reset invisibility
         document.getElementById('score').innerText = "0";
 
         for(let i=0; i<20; i++) {
@@ -279,6 +299,7 @@
 
         spawnEnemy("enemy-red", "wander");
         for(let i=0; i<10; i++) spawnFood();
+        spawnPower(); // Spawn initial power pellet
         
         gameRunning = true;
         update();
@@ -310,31 +331,50 @@
         foodPellets.push({ x, y, use:el });
     }
 
+    // New Function: Spawn Power Pellet
+    function spawnPower() {
+        const x = 50 + Math.random() * (window.innerWidth - 100);
+        const y = 50 + Math.random() * (window.innerHeight - 100);
+        const el = document.createElementNS("http://www.w3.org/2000/svg", "circle");
+        el.setAttribute("cx", 0); el.setAttribute("cy", 0); el.setAttribute("r", 7);
+        el.classList.add("power-pellet");
+        el.setAttribute("transform", `translate(${x},${y})`);
+        document.getElementById('power-layer').appendChild(el);
+        powerPellets.push({ x, y, el });
+    }
+
     /* --- GAME LOOP --- */
     function update() {
         if(!gameRunning) return;
         frameCount++;
 
-        // --- NEW BOOST LOGIC (ENERGY BASED) ---
-        // Boost if clicking AND energy > 0
+        // --- NEW INVISIBILITY LOGIC ---
+        if(player.invisibleTimer > 0) {
+            player.invisibleTimer -= 0.016;
+            document.getElementById('score-label').innerText = ">>> SHIELD ACTIVE <<<";
+            document.getElementById('score-label').style.color = "#00ffff";
+            player.segments.forEach(s => s.use.classList.add('ghost'));
+        } else {
+            document.getElementById('score-label').innerText = "DATA COLLECTED";
+            document.getElementById('score-label').style.color = "#888";
+            player.segments.forEach(s => s.use.classList.remove('ghost'));
+        }
+
+        // --- BOOST LOGIC ---
         if(player.isBoosting && player.energy > 0) {
             player.speed = 4; // Fast
             player.energy -= 0.6; // Drain Energy
             
             if(frameCount % 8 === 0) {
                 const tail = player.segments[player.segments.length-1];
-                createParticle(tail.x, tail.y, '#ff00ff'); // Purple Trail
+                createParticle(tail.x, tail.y, '#ff00ff');
             }
         } else {
             player.speed = 7; // Normal
-            if(player.energy < 100) player.energy += 0.3; // Regenerate Energy
+            if(player.energy < 100) player.energy += 0.3; // Regenerate
         }
-
-        // Clamp Energy between 0 and 100
         if(player.energy < 0) player.energy = 0;
         if(player.energy > 100) player.energy = 100;
-        
-        // Update Energy Bar UI
         document.getElementById('boost-fill').style.width = player.energy + "%";
 
         // --- MOVE PLAYER ---
@@ -378,7 +418,24 @@
                 s.x += (p.x - s.x)*0.4; s.y += (p.y - s.y)*0.4;
                 s.use.setAttribute("transform", `translate(${s.x},${s.y}) scale(${1 - i/20})`);
             }
-            if(Math.hypot(head.x - eh.x, head.y - eh.y) < 20) gameOver();
+            
+            // Check collision - ONLY DIE IF NOT INVISIBLE
+            if(Math.hypot(head.x - eh.x, head.y - eh.y) < 20) {
+                if(player.invisibleTimer <= 0) {
+                    gameOver();
+                }
+            }
+        });
+
+        // --- POWER PELLETS COLLISION ---
+        powerPellets.forEach((p, i) => {
+            if(Math.hypot(head.x - p.x, head.y - p.y) < 30) {
+                p.el.remove(); powerPellets.splice(i, 1);
+                AudioEngine.play('power');
+                player.invisibleTimer = 5.0; // 5 Seconds Invisibility
+                showMsg("🛡️ INVISIBLE MODE ACTIVATED");
+                setTimeout(spawnPower, 10000); // Respawn after 10s
+            }
         });
 
         // --- FOOD ---
@@ -445,3 +502,8 @@
 </script>
 </body>
 </html>
+
+                    
+        
+
+        
